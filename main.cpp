@@ -9,7 +9,10 @@
 using namespace std;
 using namespace cv;
 
-struct ImageData {
+class ImageData {
+public:
+	ImageData(Mat img) : img(img) { }
+
 	Mat    img;
 	Point  massCentre;
 	string fileName;
@@ -44,22 +47,6 @@ float getDistance(const ImageData *d1, const ImageData *d2) {
 	return (float)sum / weights;
 }
 
-void preprocessImage(Mat &img) {
-// Erosion
-//	const int erosionSize = 1;
-//	static Mat element = getStructuringElement(
-//		MORPH_ELLIPSE,
-//		Size( 2 * erosionSize + 1, 2 * erosionSize + 1 ),
-//		Point( erosionSize, erosionSize )
-//	);
-
-//	erode (img, img, element);
-//	dilate(img, img, element);
-
-// Blur
-	GaussianBlur(img, img, Size(3, 3), 0);
-}
-
 void cropImage(Mat &img, Mat &res, Point &massCentre) {
 
 	massCentre = Point(0, 0);
@@ -92,11 +79,30 @@ void cropImage(Mat &img, Mat &res, Point &massCentre) {
 	res = img(Rect(fstCol, fstRow, lastCol - fstCol + 1, lastRow - fstRow + 1));
 }
 
+void preprocessImage(ImageData *data) {
+	// Erode
+
+	//	const int erosionSize = 1;
+	//	static Mat element = getStructuringElement(
+	//		MORPH_ELLIPSE,
+	//		Size( 2 * erosionSize + 1, 2 * erosionSize + 1 ),
+	//		Point( erosionSize, erosionSize )
+	//	);
+	//	erode (img, img, element);
+	//	dilate(img, img, element);
+
+	// Blur
+	GaussianBlur(data->img, data->img, Size(3, 3), 0);
+
+	// Crop
+	cropImage(data->img, data->img, data->massCentre);
+}
+
 void openImages(vector<ImageData *> &images) {
 	images.clear();
 
 	int i = 0;
-	cerr << "Opening images.";
+	cerr << "Opening and preprocessing images:" << endl;
 
 	while (true) {
 		stringstream stream;
@@ -104,52 +110,105 @@ void openImages(vector<ImageData *> &images) {
 		std::string name = stream.str();
 
 		if (i % 250 == 0)
-			cerr << ".";
+			cerr << "\r" << i;
 
 		Mat tmp = imread(name, CV_LOAD_IMAGE_GRAYSCALE);
 		if (tmp.empty())
 			break;
 
-		preprocessImage(tmp);
-
-		ImageData *data = new ImageData;
-
-		Point centre;
-		cropImage(tmp, data->img, data->massCentre);
-
+		ImageData *data = new ImageData(tmp);
+		preprocessImage(data);
 		images.push_back(data);
 	}
 
-	cerr << endl;
+	cerr << "\rOpened " << images.size() << " images " << endl;
+}
+
+void dbscan(const vector<ImageData *>& data) {
+	vector<vector<char>> distances;
+	vector<bool> visited(data.size(), false);
+
+	cerr << "Computing pairwise distances:" << endl;
+
+	// Compute distance matrix
+	int counter = 0;
+	int p1 = data.size() * (data.size() + 1) / 200;
+	for (int i = 0; i < data.size(); ++i) {
+		distances.push_back(vector<char>());
+
+		for (int j = 0; j < i; ++j, ++counter) {
+			distances[i].push_back(getDistance(data[i], data[j]));
+
+			if (counter % p1 == 0)
+				cerr << counter / p1 << "%\r";
+		}
+	}
+
+	cerr << "Done" << endl;
 }
 
 int main()
 {
-
 	vector<ImageData *> data;
 	openImages(data);
-
-	cerr << "Images opened" << endl;
-
-	for (int i = 0; i < data.size(); ++i) {
-		float minDist = 1000;
-		float dist;
-		int minIdx = -1;
-		for (int j = 0; j < data.size(); ++j) {
-			dist = getDistance(data[i], data[j]);
-			if (dist < minDist && i != j) {
-				minDist = dist;
-				minIdx = j;
-			}
-		}
-
-		imshow("img_a", data[i]->img);
-		imshow("img_b", data[minIdx]->img);
-		cerr << "distance: " << minDist;
-		waitKey(0);
-	}
-
+	dbscan(data);
 
 	return 0;
 }
+
+//int main()
+//{
+
+//	vector<ImageData *> data;
+//	openImages(data);
+
+//	vector<int> badLengths, goodLengths;
+
+//	cerr << "Images opened" << endl;
+
+//	vector<int> dists;
+//	for (int i = 0; i < 256; ++i) {
+//		dists.push_back(0);
+//		badLengths.push_back(0);
+//		goodLengths.push_back(0);
+//	}
+
+//	for (int i = 0; i < data.size(); ++i) {
+//		float minDist = 1000;
+//		float dist;
+//		int minIdx = -1;
+
+//		if (i % 100 == 0)
+//			cerr << "Processed " << i << " out of " << data.size() << endl;
+
+//		for (int j = 0; j < data.size(); ++j) {
+//			dist = getDistance(data[i], data[j]);
+//			++dists[(int)dist];
+//			if (dist < minDist && i != j) {
+//				minDist = dist;
+//				minIdx = j;
+//			}
+//		}
+//		imshow("img_a", data[i]->img);
+//		imshow("img_b", data[minIdx]->img);
+//		cerr << "distance: " << minDist;
+//		char key = waitKey(0);
+//		if (key == 'g')
+//			++goodLengths[(int)minDist];
+//		else if (key == 'q')
+//			break;
+//		else
+//			++badLengths[(int)minDist];
+//	}
+////	for (int i = 0; i < 256; ++i)
+////		cerr << i << "\t" << dists[i] << endl;
+
+//	for (int i = 0; i < 256; ++i)
+//		cerr << "i" << "\t" << badLengths[i] << endl;
+
+//	for (int i = 0; i < 256; ++i)
+//		cerr << "i" << "\t" << goodLengths[i] << endl;
+
+//	return 0;
+//}
 
