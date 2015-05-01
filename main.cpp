@@ -80,6 +80,7 @@ void cropImage(Mat &img, Mat &res, Point &massCentre) {
 }
 
 void preprocessImage(ImageData *data) {
+	// Zmiana
 	// Erode
 
 	//	const int erosionSize = 1;
@@ -117,6 +118,7 @@ void openImages(vector<ImageData *> &images) {
 			break;
 
 		ImageData *data = new ImageData(tmp);
+		data->fileName = name;
 		preprocessImage(data);
 		images.push_back(data);
 	}
@@ -124,19 +126,39 @@ void openImages(vector<ImageData *> &images) {
 	cerr << "\rOpened " << images.size() << " images " << endl;
 }
 
-void dbscan(const vector<ImageData *>& data) {
-	vector<vector<char>> distances;
-	vector<bool> visited(data.size(), false);
+void saveClusters(const vector<vector<ImageData *>> &clusters) {
+
+	for (size_t i = 0; i < clusters.size(); ++i) {
+		for (size_t j = 0; j < clusters[i].size(); ++j)
+			cout << clusters[i][j]->fileName << "\t";
+
+		cout << endl;
+	}
+}
+
+// Based on pseudocode from
+// https://en.wikipedia.org/wiki/DBSCAN
+void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& clusters) {
+
+	const float eps    = 28.0;
+	const float minPts = 10;
+
+	vector<vector<float>> distances;
+	vector<bool> visited;
+	vector<bool> inCluster;
+
+	visited.assign(data.size(), false);
+	inCluster.assign(data.size(), false);
+	clusters.clear();
 
 	cerr << "Computing pairwise distances:" << endl;
 
-	// Compute distance matrix
 	int counter = 0;
 	int p1 = data.size() * (data.size() + 1) / 200;
-	for (int i = 0; i < data.size(); ++i) {
-		distances.push_back(vector<char>());
+	for (size_t i = 0; i < data.size(); ++i) {
+		distances.push_back(vector<float>());
 
-		for (int j = 0; j < i; ++j, ++counter) {
+		for (size_t j = 0; j <= i; ++j, ++counter) {
 			distances[i].push_back(getDistance(data[i], data[j]));
 
 			if (counter % p1 == 0)
@@ -144,14 +166,62 @@ void dbscan(const vector<ImageData *>& data) {
 		}
 	}
 
+	for (size_t i = 0; i < data.size(); ++i)
+		for (size_t j = i + 1; j < data.size(); ++j)
+			distances[i].push_back(distances[j][i]);
+
 	cerr << "Done" << endl;
+
+	counter = 0;
+	for (size_t P = 0; P < data.size(); ++P, ++counter) if (!visited[P]) {
+		if (counter % 100 == 0)
+			cerr << "." << endl;
+		visited[P] = true;
+		vector<size_t> neighborPts;
+		for (size_t i = 0; i < data.size(); ++i) if (distances[P][i] <= eps)
+			neighborPts.push_back(i);
+
+		if (neighborPts.size() < minPts)
+			continue;
+
+		clusters.push_back(vector<ImageData *>());
+		vector<ImageData *> &C = clusters[clusters.size() - 1];
+
+		C.push_back(data[P]);
+		inCluster[P] = true;
+
+		for (size_t P2i = 0; P2i < neighborPts.size(); ++P2i) {
+			size_t P2 = neighborPts[P2i];
+			if (!visited[P2]) {
+				visited[P2] = true;
+
+				vector<size_t> neighborPts2;
+				for (size_t i = 0; i < data.size(); ++i) if (distances[P2][i] <= eps)
+					neighborPts2.push_back(i);
+				if (neighborPts2.size() >= minPts)
+					for (size_t i = 0; i < neighborPts2.size(); ++i)
+						if (!visited[neighborPts2[i]] || !inCluster[neighborPts2[i]])
+							neighborPts.push_back(neighborPts2[i]);
+			}
+
+			if (!inCluster[P2]) {
+				C.push_back(data[P2]);
+				inCluster[P2] = true;
+			}
+		}
+	}
+
+	cerr << "Done." << endl;
 }
 
 int main()
 {
-	vector<ImageData *> data;
+	vector<ImageData *>        data;
+	vector<vector<ImageData*>> clusters;
+
 	openImages(data);
-	dbscan(data);
+	dbscanMain(data, clusters);
+	saveClusters(clusters);
 
 	return 0;
 }
