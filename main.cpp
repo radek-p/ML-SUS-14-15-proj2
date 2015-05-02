@@ -6,6 +6,11 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
+
+namespace fs = boost::filesystem;
+
 using namespace std;
 using namespace cv;
 
@@ -80,7 +85,6 @@ void cropImage(Mat &img, Mat &res, Point &massCentre) {
 }
 
 void preprocessImage(ImageData *data) {
-	// Zmiana
 	// Erode
 
 	//	const int erosionSize = 1;
@@ -99,26 +103,32 @@ void preprocessImage(ImageData *data) {
 	cropImage(data->img, data->img, data->massCentre);
 }
 
-void openImages(vector<ImageData *> &images) {
-	images.clear();
+void openImages(const fs::path &path, vector<ImageData *> &images) {
 
-	int i = 0;
 	cerr << "Opening and preprocessing images:" << endl;
+	images.clear();
+	int counter = 0;
 
-	while (true) {
-		stringstream stream;
-		stream << "data/" << i++ << ".png";
-		std::string name = stream.str();
+	for (fs::directory_iterator it(path), eod; it != eod; ++it) {
 
-		if (i % 250 == 0)
-			cerr << "\r" << i;
+		fs::path file = fs::absolute(*it);
+		if (!file.has_extension() || file.extension().string() != ".png") {
+			cerr << "skipping file: " << file.string() << endl;
+			continue;
+		}
 
-		Mat tmp = imread(name, CV_LOAD_IMAGE_GRAYSCALE);
-		if (tmp.empty())
-			break;
+		Mat tmp = imread(file.string(), CV_LOAD_IMAGE_GRAYSCALE);
+		if (tmp.empty()) {
+			cerr << "could not load file " << file.string() << endl;
+			continue;
+		}
+
+		++counter;
+		if (counter % 250 == 0)
+			cerr << "\r" << counter;
 
 		ImageData *data = new ImageData(tmp);
-		data->fileName = name;
+		data->fileName = file.filename().string();
 		preprocessImage(data);
 		images.push_back(data);
 	}
@@ -126,14 +136,29 @@ void openImages(vector<ImageData *> &images) {
 	cerr << "\rOpened " << images.size() << " images " << endl;
 }
 
-void saveClusters(const vector<vector<ImageData *>> &clusters) {
+void saveClusters(const fs::path &path, const vector<vector<ImageData *>> &clusters) {
+
+	fs::ofstream out(path);
+	size_t numberOfItems = 0;
 
 	for (size_t i = 0; i < clusters.size(); ++i) {
-		for (size_t j = 0; j < clusters[i].size(); ++j)
-			cout << clusters[i][j]->fileName << "\t";
+		if (clusters[i].size() < 1)
+			continue;
 
-		cout << endl;
+		out << clusters[i][0]->fileName;
+		++numberOfItems;
+
+		for (size_t j = 1; j < clusters[i].size(); ++j) {
+			out << " " << clusters[i][j]->fileName;
+			++numberOfItems;
+		}
+
+		out << endl;
 	}
+
+	out.close();
+	cerr << "Total number of entries " << numberOfItems << endl;
+	cerr << "Number of clusters " << clusters.size() << endl;
 }
 
 // Based on pseudocode from
@@ -172,10 +197,12 @@ void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& cl
 
 	cerr << "Done" << endl;
 
+	cerr << "Clustering graph" << endl;
+
 	counter = 0;
 	for (size_t P = 0; P < data.size(); ++P, ++counter) if (!visited[P]) {
 		if (counter % 100 == 0)
-			cerr << "." << endl;
+			cerr << ".";
 		visited[P] = true;
 		vector<size_t> neighborPts;
 		for (size_t i = 0; i < data.size(); ++i) if (distances[P][i] <= eps)
@@ -214,14 +241,43 @@ void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& cl
 	cerr << "Done." << endl;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
+	if (argc != 3) {
+		cerr
+			<< "Usage:"  << endl
+			<< argv[0] << " <input dir> <output file>" << endl
+			<< "    <input dir>   - path to a directory containing *.png files" << endl
+			<< "    <output file> - place where the output file should be created" << endl;
+		return 1;
+	}
+
+	fs::path inputDirPath(argv[1]);
+	fs::path outputPath(argv[2]);
+
+	if (!fs::exists(inputDirPath)) {
+		cerr << "Input folder \"" << inputDirPath << "\" does not exist" << endl;
+		return 1;
+	}
+
+	if (!fs::is_directory(inputDirPath)) {
+		cerr << "Specified input \"" << inputDirPath << "\" is not a directory" << endl;
+		return 1;
+	}
+
+	if (fs::exists(outputPath)) {
+		cerr << "Output file already exists and will be overwritten." << endl;
+//		return 1;
+	}
+
 	vector<ImageData *>        data;
 	vector<vector<ImageData*>> clusters;
 
-	openImages(data);
+	openImages(inputDirPath, data);
+
 	dbscanMain(data, clusters);
-	saveClusters(clusters);
+
+	saveClusters(outputPath, clusters);
 
 	return 0;
 }
