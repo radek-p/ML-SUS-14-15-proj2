@@ -17,7 +17,6 @@ namespace fs = boost::filesystem;
 using namespace std;
 using namespace cv;
 
-Mat m01, m10;
 
 class ImageData {
 public:
@@ -165,7 +164,7 @@ void assesClusters(const vector<vector<ImageData *>> &clusters) {
 	int i = 0;
 	for (auto &cluster : clusters) {
 		for (ImageData *element : cluster)
-			resultLabels[element->fileName] = make_pair(i, element);
+			resultLabels[element->fileName] = make_pair(i, nullptr);
 		++i;
 	}
 
@@ -175,62 +174,19 @@ void assesClusters(const vector<vector<ImageData *>> &clusters) {
 	for (auto &v1 : resultLabels) {
 		for (auto &v2 : resultLabels) {
 
-			ImageData * d1 = v1.second.second;
-			ImageData * d2 = v2.second.second;
-
-			Point tl = Point(
-				-min(d1->massCentre.x, d2->massCentre.x),
-				-min(d1->massCentre.y, d2->massCentre.y)
-			);
-
-			Point br = Point(
-				min(d1->img.cols - d1->massCentre.x, d2->img.cols - d2->massCentre.x),
-				min(d1->img.rows - d1->massCentre.y, d2->img.rows - d2->massCentre.y)
-			);
-
 			if (v1.first == v2.first)
 				continue;
 
 			if (v1.second.first == v2.second.first) {
-				if (labels[v1.first] == labels[v2.first]) {
+				if (labels[v1.first] == labels[v2.first])
 					++e11;
-				} else {
+				else
 					++e10;
-
-					for (int dy = tl.y; dy <= br.y; ++dy) {
-						if (dy >= -15 && dy <= 15)
-						for (int dx = tl.x; dx <= br.x; ++dx) {
-							if (dx >= -15 && dx <= 15) {
-								uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
-								uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
-								if (a != b) {
-									++(m10.at<int>(15 + dy, 15 + dx));
-								}
-							}
-						}
-					}
-				}
 			} else {
-				if (labels[v1.first] == labels[v2.first]) {
+				if (labels[v1.first] == labels[v2.first])
 					++e01;
-
-					for (int dy = tl.y; dy <= br.y; ++dy) {
-						if (dy >= -15 && dy <= 15)
-						for (int dx = tl.x; dx <= br.x; ++dx) {
-
-							if (dx >= -15 && dx <= 15) {
-								uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
-								uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
-								if (a == b) {
-									++(m01.at<int>(15 + dy, 15 + dx));
-								}
-							}
-						}
-					}
-
-				} else {
+				else
 					++e00;
-				}
 			}
 		}
 	}
@@ -295,20 +251,14 @@ int main(int argc, char *argv[])
 	vector<vector<ImageData*>> clusters;
 
 	openImages(inputDirPath, data);
+
 	partitionMethod(data, clusters);
 
 	cerr << "Number of clusters: " << clusters.size() << endl;
 
-	m01 = Mat::zeros(31, 31, CV_32SC1);
-	m10 = Mat::zeros(31, 31, CV_32SC1);
-
 	assesClusters(clusters);
 
-	imshow("m10", m10);
-	imshow("m01", m01);
-
-	waitKey(0);
-
 	saveClusters(outputPath, clusters);
+
 	return 0;
 }
