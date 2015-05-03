@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 
+//#include <opencv
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
@@ -13,6 +14,7 @@ namespace fs = boost::filesystem;
 
 using namespace std;
 using namespace cv;
+
 
 class ImageData {
 public:
@@ -25,7 +27,10 @@ public:
 
 float getDistance(const ImageData *d1, const ImageData *d2) {
 
-	const int maxSizeDiff = 4;
+//	imshow("img", d1->img);
+//	waitKey(0);
+
+	const int maxSizeDiff = 5;
 	if (abs(d1->img.cols - d2->img.cols) > maxSizeDiff || abs(d1->img.rows - d2->img.rows) > maxSizeDiff)
 		return 128.0;
 
@@ -166,7 +171,7 @@ void saveClusters(const fs::path &path, const vector<vector<ImageData *>> &clust
 void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& clusters) {
 
 	const float eps    = 28.0;
-	const float minPts = 10;
+	const float minPts = 6;
 
 	vector<vector<float>> distances;
 	vector<bool> visited;
@@ -241,6 +246,24 @@ void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& cl
 	cerr << "Done." << endl;
 }
 
+void partitionMethod(const vector<ImageData *>& data, vector<vector<ImageData *>>&clusters) {
+
+	vector<int> labels;
+	int number = cv::partition(data, labels, [](ImageData *d1, ImageData *d2) {
+		return getDistance(d1, d2) < 30.0;
+	});
+
+	cerr << "Number of cluster: " << number << endl;
+
+	for (int i=  0; i < number; ++i)
+		clusters.push_back(vector<ImageData *>());
+
+	for (size_t i = 0; i < labels.size(); ++i) {
+		clusters[labels[i]].push_back(data[i]);
+	}
+
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc != 3) {
@@ -267,17 +290,18 @@ int main(int argc, char *argv[])
 
 	if (fs::exists(outputPath)) {
 		cerr << "Output file already exists and will be overwritten." << endl;
-//		return 1;
+		// return 1;
 	}
 
 	vector<ImageData *>        data;
 	vector<vector<ImageData*>> clusters;
 
-	openImages(inputDirPath, data);
+	openImages  (inputDirPath,     data);
+//	dbscanMain  (        data, clusters);
+	partitionMethod(data, clusters);
+	saveClusters(  outputPath, clusters);
 
-	dbscanMain(data, clusters);
-
-	saveClusters(outputPath, clusters);
+	cerr << "Done. Output saved to file." << endl;
 
 	return 0;
 }
