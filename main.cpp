@@ -3,12 +3,14 @@
 #include <vector>
 #include <algorithm>
 
-//#include <opencv
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
+
+#include "labels.h"
+#include "thinning.h"
 
 namespace fs = boost::filesystem;
 
@@ -90,16 +92,25 @@ void cropImage(Mat &img, Mat &res, Point &massCentre) {
 }
 
 void preprocessImage(ImageData *data) {
-	// Erode
 
-	//	const int erosionSize = 1;
-	//	static Mat element = getStructuringElement(
-	//		MORPH_ELLIPSE,
-	//		Size( 2 * erosionSize + 1, 2 * erosionSize + 1 ),
-	//		Point( erosionSize, erosionSize )
-	//	);
-	//	erode (img, img, element);
+	// Thinning
+	Mat tmp;
+	bitwise_not(data->img, tmp);
+	thinning(tmp);
+	bitwise_not(tmp, data->img);
+
+	// Erode
+	const int erosionSize = 1;
+	static Mat element = getStructuringElement(
+		MORPH_ELLIPSE,
+		Size( 2 * erosionSize + 1, 2 * erosionSize + 1 ),
+		Point( erosionSize, erosionSize )
+	);
+	erode (data->img, data->img, element);
 	//	dilate(img, img, element);
+
+//	imshow("img", data->img);
+//	waitKey(0);
 
 	// Blur
 	GaussianBlur(data->img, data->img, Size(3, 3), 0);
@@ -118,13 +129,13 @@ void openImages(const fs::path &path, vector<ImageData *> &images) {
 
 		fs::path file = fs::absolute(*it);
 		if (!file.has_extension() || file.extension().string() != ".png") {
-			cerr << "skipping file: " << file.string() << endl;
+			cerr << "Skipping file: \"" << file.string() << "\"" << endl;
 			continue;
 		}
 
 		Mat tmp = imread(file.string(), CV_LOAD_IMAGE_GRAYSCALE);
 		if (tmp.empty()) {
-			cerr << "could not load file " << file.string() << endl;
+			cerr << "Could not load file \"" << file.string() << "\"" << endl;
 			continue;
 		}
 
@@ -162,8 +173,43 @@ void saveClusters(const fs::path &path, const vector<vector<ImageData *>> &clust
 	}
 
 	out.close();
-	cerr << "Total number of entries " << numberOfItems << endl;
-	cerr << "Number of clusters " << clusters.size() << endl;
+}
+
+void assesClusters(const vector<vector<ImageData *>> &clusters) {
+
+	cerr << "Assesing clusters." << endl;
+	map<string, int> resultLabels;
+
+	int i = 0;
+	for (auto &cluster : clusters) {
+		for (ImageData *element : cluster)
+			resultLabels[element->fileName] = i;
+		++i;
+	}
+
+	int e00 = 0, e01 = 0, e10 = 0, e11 = 0;
+
+	for (auto &v1 : resultLabels) {
+		for (auto &v2 : resultLabels) {
+
+			if (v1.first == v2.first)
+				continue;
+
+			if (v1.second == v2.second) {
+				if (labels[v1.first] == labels[v2.first])
+					++e11;
+				else
+					++e10;
+			} else {
+				if (labels[v1.first] == labels[v2.first])
+					++e01;
+				else
+					++e00;
+			}
+		}
+	}
+
+	cerr << "e00: " << e00 << ", e01: " << e01 << ", e10: " << e10 << ", e11: " << e11 << endl;
 }
 
 // Based on pseudocode from
@@ -299,6 +345,11 @@ int main(int argc, char *argv[])
 	openImages  (inputDirPath,     data);
 //	dbscanMain  (        data, clusters);
 	partitionMethod(data, clusters);
+
+//	cerr << "Total number of entries " << numberOfItems << endl;
+	cerr << "Number of clusters " << clusters.size() << endl;
+
+	assesClusters(clusters);
 	saveClusters(  outputPath, clusters);
 
 	cerr << "Done. Output saved to file." << endl;
