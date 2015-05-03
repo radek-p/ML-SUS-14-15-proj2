@@ -10,13 +10,14 @@
 #include <boost/filesystem/fstream.hpp>
 
 #include "labels.h"
-#include "thinning.h"
+#include "mask.h"
 
 namespace fs = boost::filesystem;
 
 using namespace std;
 using namespace cv;
 
+Mat m01, m10;
 
 class ImageData {
 public:
@@ -59,6 +60,41 @@ float getDistance(const ImageData *d1, const ImageData *d2) {
 	return (float)sum / weights;
 }
 
+float getDistance2(const ImageData *d1, const ImageData *d2) {
+
+	const int maxSizeDiff = 5;
+	if (abs(d1->img.cols - d2->img.cols) > maxSizeDiff || abs(d1->img.rows - d2->img.rows) > maxSizeDiff)
+		return 128.0;
+
+	Point tl = Point(
+		-min(d1->massCentre.x, d2->massCentre.x),
+		-min(d1->massCentre.y, d2->massCentre.y)
+	);
+	Point br = Point(
+		min(d1->img.cols - d1->massCentre.x, d2->img.cols - d2->massCentre.x),
+		min(d1->img.rows - d1->massCentre.y, d2->img.rows - d2->massCentre.y)
+	);
+
+	int sum = 0;
+	int weights = 0;
+	for (int dy = tl.y; dy <= br.y; ++dy) {
+		for (int dx = tl.x; dx <= br.x; ++dx) {
+			int weight;
+			if (dy >= -15 && dy <= 15 && dx >= -15 && dx <= 15) {
+				weight = weightsMask[15 + dy][15 + dx] + weightsMask2[15 + dy][15 + dx];
+			} else {
+				weight = 1;
+			}
+			uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
+			uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
+			sum     += (int)weight * (int)abs(a - b);
+			weights += weight;
+		}
+	}
+
+	return (float)sum / weights;
+}
+
 void cropImage(Mat &img, Mat &res, Point &massCentre) {
 
 	massCentre = Point(0, 0);
@@ -92,36 +128,13 @@ void cropImage(Mat &img, Mat &res, Point &massCentre) {
 }
 
 void preprocessImage(ImageData *data) {
-
-	// Thinning
-	Mat tmp;
-	bitwise_not(data->img, tmp);
-	thinning(tmp);
-	bitwise_not(tmp, data->img);
-
-	// Erode
-	const int erosionSize = 1;
-	static Mat element = getStructuringElement(
-		MORPH_ELLIPSE,
-		Size( 2 * erosionSize + 1, 2 * erosionSize + 1 ),
-		Point( erosionSize, erosionSize )
-	);
-	erode (data->img, data->img, element);
-	//	dilate(img, img, element);
-
-//	imshow("img", data->img);
-//	waitKey(0);
-
-	// Blur
-	GaussianBlur(data->img, data->img, Size(3, 3), 0);
-
 	// Crop
 	cropImage(data->img, data->img, data->massCentre);
 }
 
 void openImages(const fs::path &path, vector<ImageData *> &images) {
 
-	cerr << "Opening and preprocessing images:" << endl;
+	cerr << "> Opening and preprocessing images:" << endl;
 	images.clear();
 	int counter = 0;
 
@@ -153,7 +166,7 @@ void openImages(const fs::path &path, vector<ImageData *> &images) {
 }
 
 void saveClusters(const fs::path &path, const vector<vector<ImageData *>> &clusters) {
-
+	cerr << "> Saving results to file \"" << path << "\"" << endl;
 	fs::ofstream out(path);
 	size_t numberOfItems = 0;
 
@@ -171,135 +184,103 @@ void saveClusters(const fs::path &path, const vector<vector<ImageData *>> &clust
 
 		out << endl;
 	}
-
 	out.close();
+	cerr << "Done." << endl;
 }
 
 void assesClusters(const vector<vector<ImageData *>> &clusters) {
+	cerr << "> Assesing clusters." << endl;
 
-	cerr << "Assesing clusters." << endl;
-	map<string, int> resultLabels;
+	map<string, pair<int, ImageData *>> resultLabels;
 
 	int i = 0;
 	for (auto &cluster : clusters) {
 		for (ImageData *element : cluster)
-			resultLabels[element->fileName] = i;
+			resultLabels[element->fileName] = make_pair(i, element);
 		++i;
 	}
+
 
 	int e00 = 0, e01 = 0, e10 = 0, e11 = 0;
 
 	for (auto &v1 : resultLabels) {
 		for (auto &v2 : resultLabels) {
 
+			ImageData * d1 = v1.second.second;
+			ImageData * d2 = v2.second.second;
+
+			Point tl = Point(
+				-min(d1->massCentre.x, d2->massCentre.x),
+				-min(d1->massCentre.y, d2->massCentre.y)
+			);
+
+			Point br = Point(
+				min(d1->img.cols - d1->massCentre.x, d2->img.cols - d2->massCentre.x),
+				min(d1->img.rows - d1->massCentre.y, d2->img.rows - d2->massCentre.y)
+			);
+
 			if (v1.first == v2.first)
 				continue;
 
-			if (v1.second == v2.second) {
-				if (labels[v1.first] == labels[v2.first])
+			if (v1.second.first == v2.second.first) {
+				if (labels[v1.first] == labels[v2.first]) {
 					++e11;
-				else
+				} else {
 					++e10;
+
+					for (int dy = tl.y; dy <= br.y; ++dy) {
+						if (dy >= -15 && dy <= 15)
+						for (int dx = tl.x; dx <= br.x; ++dx) {
+							if (dx >= -15 && dx <= 15) {
+								uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
+								uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
+								if (a != b) {
+									++(m10.at<int>(15 + dy, 15 + dx));
+								}
+							}
+						}
+					}
+				}
 			} else {
-				if (labels[v1.first] == labels[v2.first])
+				if (labels[v1.first] == labels[v2.first]) {
 					++e01;
-				else
+
+					for (int dy = tl.y; dy <= br.y; ++dy) {
+						if (dy >= -15 && dy <= 15)
+						for (int dx = tl.x; dx <= br.x; ++dx) {
+
+							if (dx >= -15 && dx <= 15) {
+								uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
+								uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
+								if (a == b) {
+									++(m01.at<int>(15 + dy, 15 + dx));
+								}
+							}
+						}
+					}
+
+				} else {
 					++e00;
-			}
-		}
-	}
-
-	cerr << "e00: " << e00 << ", e01: " << e01 << ", e10: " << e10 << ", e11: " << e11 << endl;
-}
-
-// Based on pseudocode from
-// https://en.wikipedia.org/wiki/DBSCAN
-void dbscanMain(const vector<ImageData *>& data, vector<vector<ImageData *>>& clusters) {
-
-	const float eps    = 28.0;
-	const float minPts = 6;
-
-	vector<vector<float>> distances;
-	vector<bool> visited;
-	vector<bool> inCluster;
-
-	visited.assign(data.size(), false);
-	inCluster.assign(data.size(), false);
-	clusters.clear();
-
-	cerr << "Computing pairwise distances:" << endl;
-
-	int counter = 0;
-	int p1 = data.size() * (data.size() + 1) / 200;
-	for (size_t i = 0; i < data.size(); ++i) {
-		distances.push_back(vector<float>());
-
-		for (size_t j = 0; j <= i; ++j, ++counter) {
-			distances[i].push_back(getDistance(data[i], data[j]));
-
-			if (counter % p1 == 0)
-				cerr << counter / p1 << "%\r";
-		}
-	}
-
-	for (size_t i = 0; i < data.size(); ++i)
-		for (size_t j = i + 1; j < data.size(); ++j)
-			distances[i].push_back(distances[j][i]);
-
-	cerr << "Done" << endl;
-
-	cerr << "Clustering graph" << endl;
-
-	counter = 0;
-	for (size_t P = 0; P < data.size(); ++P, ++counter) if (!visited[P]) {
-		if (counter % 100 == 0)
-			cerr << ".";
-		visited[P] = true;
-		vector<size_t> neighborPts;
-		for (size_t i = 0; i < data.size(); ++i) if (distances[P][i] <= eps)
-			neighborPts.push_back(i);
-
-		if (neighborPts.size() < minPts)
-			continue;
-
-		clusters.push_back(vector<ImageData *>());
-		vector<ImageData *> &C = clusters[clusters.size() - 1];
-
-		C.push_back(data[P]);
-		inCluster[P] = true;
-
-		for (size_t P2i = 0; P2i < neighborPts.size(); ++P2i) {
-			size_t P2 = neighborPts[P2i];
-			if (!visited[P2]) {
-				visited[P2] = true;
-
-				vector<size_t> neighborPts2;
-				for (size_t i = 0; i < data.size(); ++i) if (distances[P2][i] <= eps)
-					neighborPts2.push_back(i);
-				if (neighborPts2.size() >= minPts)
-					for (size_t i = 0; i < neighborPts2.size(); ++i)
-						if (!visited[neighborPts2[i]] || !inCluster[neighborPts2[i]])
-							neighborPts.push_back(neighborPts2[i]);
-			}
-
-			if (!inCluster[P2]) {
-				C.push_back(data[P2]);
-				inCluster[P2] = true;
+				}
 			}
 		}
 	}
 
 	cerr << "Done." << endl;
+	cerr << "e00: " << e00 << endl
+		 << "e01: " << e01 << endl
+		 << "e10: " << e10 << endl
+		 << "e11: " << e11 << endl;
 }
 
+
 void partitionMethod(const vector<ImageData *>& data, vector<vector<ImageData *>>&clusters) {
+	cerr << "> Clustering images" << endl;
 
 	vector<int> labels;
 	int number = cv::partition(data, labels, [](ImageData *d1, ImageData *d2) {
-		return getDistance(d1, d2) < 30.0;
+		return getDistance2(d1, d2) < 15.0;
 	});
-
-	cerr << "Number of cluster: " << number << endl;
 
 	for (int i=  0; i < number; ++i)
 		clusters.push_back(vector<ImageData *>());
@@ -308,7 +289,10 @@ void partitionMethod(const vector<ImageData *>& data, vector<vector<ImageData *>
 		clusters[labels[i]].push_back(data[i]);
 	}
 
+	cerr << "Done" << endl;
 }
+
+
 
 int main(int argc, char *argv[])
 {
@@ -336,23 +320,43 @@ int main(int argc, char *argv[])
 
 	if (fs::exists(outputPath)) {
 		cerr << "Output file already exists and will be overwritten." << endl;
-		// return 1;
 	}
 
 	vector<ImageData *>        data;
 	vector<vector<ImageData*>> clusters;
 
-	openImages  (inputDirPath,     data);
-//	dbscanMain  (        data, clusters);
+	openImages(inputDirPath, data);
 	partitionMethod(data, clusters);
 
-//	cerr << "Total number of entries " << numberOfItems << endl;
-	cerr << "Number of clusters " << clusters.size() << endl;
+	cerr << "Number of clusters: " << clusters.size() << endl;
+
+	m01 = Mat::zeros(31, 31, CV_32SC1);
+	m10 = Mat::zeros(31, 31, CV_32SC1);
 
 	assesClusters(clusters);
-	saveClusters(  outputPath, clusters);
 
-	cerr << "Done. Output saved to file." << endl;
+	imshow("m10", m10);
+	imshow("m01", m01);
 
+	cout << "m10:" << endl;
+	for (int y = 0; y < 31; ++y) {
+		for (int x = 0; x < 31; ++x) {
+			int val = m10.at<int>(y, x);
+
+			cout << val / 351 + 1 << ", ";
+		}
+		cout << endl;
+	}
+
+//	cout << "m01:" << endl;
+//	for (int y = 0; y < 31; ++y) {
+//		for (int x = 0; x < 31; ++x) {
+//			cout << m01.at<int>(y, x) << ", ";
+//		}
+//		cout << endl;
+//	}
+	waitKey(0);
+
+	saveClusters(outputPath, clusters);
 	return 0;
 }
