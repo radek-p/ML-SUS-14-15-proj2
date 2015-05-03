@@ -28,39 +28,8 @@ public:
 	string fileName;
 };
 
-float getDistance(const ImageData *d1, const ImageData *d2) {
 
-//	imshow("img", d1->img);
-//	waitKey(0);
-
-	const int maxSizeDiff = 5;
-	if (abs(d1->img.cols - d2->img.cols) > maxSizeDiff || abs(d1->img.rows - d2->img.rows) > maxSizeDiff)
-		return 128.0;
-
-	Point tl = Point(
-		-min(d1->massCentre.x, d2->massCentre.x),
-		-min(d1->massCentre.y, d2->massCentre.y)
-	);
-	Point br = Point(
-		min(d1->img.cols - d1->massCentre.x, d2->img.cols - d2->massCentre.x),
-		min(d1->img.rows - d1->massCentre.y, d2->img.rows - d2->massCentre.y)
-	);
-
-	int sum = 0;
-	int weights = 0;
-	for (int dy = tl.y; dy <= br.y; ++dy) {
-		for (int dx = tl.x; dx <= br.x; ++dx) {
-			uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
-			uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
-			sum     += min(510 - a - b, 255) * abs(a - b);
-			weights += min(510 - a - b, 255);
-		}
-	}
-
-	return (float)sum / weights;
-}
-
-float getDistance2(const ImageData *d1, const ImageData *d2) {
+float computeDistance(const ImageData *d1, const ImageData *d2) {
 
 	const int maxSizeDiff = 5;
 	if (abs(d1->img.cols - d2->img.cols) > maxSizeDiff || abs(d1->img.rows - d2->img.rows) > maxSizeDiff)
@@ -87,7 +56,7 @@ float getDistance2(const ImageData *d1, const ImageData *d2) {
 			}
 			uchar a = d1->img.at<uchar>(d1->massCentre.y + dy, d1->massCentre.x + dx);
 			uchar b = d2->img.at<uchar>(d2->massCentre.y + dy, d2->massCentre.x + dx);
-			sum     += (int)weight * (int)abs(a - b);
+			sum     += weight * abs(a - b);
 			weights += weight;
 		}
 	}
@@ -279,7 +248,7 @@ void partitionMethod(const vector<ImageData *>& data, vector<vector<ImageData *>
 
 	vector<int> labels;
 	int number = cv::partition(data, labels, [](ImageData *d1, ImageData *d2) {
-		return getDistance2(d1, d2) < 15.0;
+		return computeDistance(d1, d2) < 15.0;
 	});
 
 	for (int i=  0; i < number; ++i)
@@ -338,23 +307,6 @@ int main(int argc, char *argv[])
 	imshow("m10", m10);
 	imshow("m01", m01);
 
-	cout << "m10:" << endl;
-	for (int y = 0; y < 31; ++y) {
-		for (int x = 0; x < 31; ++x) {
-			int val = m10.at<int>(y, x);
-
-			cout << val / 351 + 1 << ", ";
-		}
-		cout << endl;
-	}
-
-//	cout << "m01:" << endl;
-//	for (int y = 0; y < 31; ++y) {
-//		for (int x = 0; x < 31; ++x) {
-//			cout << m01.at<int>(y, x) << ", ";
-//		}
-//		cout << endl;
-//	}
 	waitKey(0);
 
 	saveClusters(outputPath, clusters);
